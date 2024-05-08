@@ -1,66 +1,49 @@
-## Foundry
+# EigenLayer Staking Contracts
 
-**Foundry is a blazing fast, portable and modular toolkit for Ethereum application development written in Rust.**
+Stakewithus [ETH Staking Contracts](https://github.com/stakewithus/eth-staking-contracts/) with [EigenLayer](https://app.eigenlayer.xyz/) integration.
 
-Foundry consists of:
+## EigenLayer
 
--   **Forge**: Ethereum testing framework (like Truffle, Hardhat and DappTools).
--   **Cast**: Swiss army knife for interacting with EVM smart contracts, sending transactions and getting chain data.
--   **Anvil**: Local Ethereum node, akin to Ganache, Hardhat Network.
--   **Chisel**: Fast, utilitarian, and verbose solidity REPL.
+The main differences between native ETH staking and EigenLayer restaking are:
 
-## Documentation
+- Validator withdrawal credentials are set to to EigenLayer smart contracts
+- Users verify ETH deposits and withdrawals by comparing proofs to EigenLayer's Beacon Chain oracle
+- Users have the option to restake ETH to EigenLayer Operators for additional rewards
 
-https://book.getfoundry.sh/
+## Setup
 
-## Usage
-
-### Build
+### Installation
 
 ```shell
-$ forge build
+forge install
+cp .env.sample .env # and fill in values
 ```
 
-### Test
+### Tests
 
 ```shell
-$ forge test
+forge test
 ```
 
-### Format
+### Scripts
 
 ```shell
-$ forge fmt
+source .env
+forge script Script/Staking.s.sol:Deploy --rpc_url $RPC_HOLESKY --broadcast --verify # or RPC_MAINNET
 ```
 
-### Gas Snapshots
+## Notes
 
-```shell
-$ forge snapshot
-```
+EigenLayer Beacon Chain ETH withdrawals are queued via [`verifyAndProcessWithdrawals()`](https://github.com/Layr-Labs/eigenlayer-contracts/blob/mainnet/src/contracts/pods/EigenPod.sol#L232), which is an unpermissioned function anyone can call with a valid proof.
 
-### Anvil
+### Dependencies
 
-```shell
-$ anvil
-```
+- [OpenZeppelin Contracts v5.0.2](https://github.com/OpenZeppelin/openzeppelin-contracts/tree/dbb6104ce834628e473d2173bbc9d47f81a9eec3)
+- [OpenZeppelin Contracts Upgradeable v5.0.2](https://github.com/OpenZeppelin/openzeppelin-contracts-upgradeable/tree/723f8cab09cdae1aca9ec9cc1cfa040c2d4b06c1)
+- [Solmate](https://github.com/transmissions11/solmate/tree/c892309933b25c03d32b1b0d674df7ae292ba925)
 
-### Deploy
+### References
 
-```shell
-$ forge script script/Counter.s.sol:CounterScript --rpc-url <your_rpc_url> --private-key <your_private_key>
-```
-
-### Cast
-
-```shell
-$ cast <subcommand>
-```
-
-### Help
-
-```shell
-$ forge --help
-$ anvil --help
-$ cast --help
-```
+- [EigenLayer Contracts](https://github.com/Layr-Labs/eigenlayer-contracts)
+- [EigenLayer Docs - Restaking Flows](https://github.com/Layr-Labs/eigenlayer-contracts/tree/dev/docs#common-user-flows)
+- [EigenLayer Proofs Generation CLI](https://github.com/Layr-Labs/eigenpod-proofs-generation)
