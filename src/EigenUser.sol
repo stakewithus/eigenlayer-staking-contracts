@@ -31,24 +31,17 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
     IDelegationManager public delegationManager;
     IDelayedWithdrawalRouter public delayedWithdrawalRouter;
 
-    /// @dev Share of current balance belonging to Stakewithus.
-    uint256 internal _treasuryRewards;
-    /// @dev Share of queued EigenLayer rewards belonging to Stakewithus.
-    uint256 internal _queuedTreasuryRewards;
+    /// @dev Unclaimed ETH in this smart contract that fully belongs to user.
+    uint256 internal _userETH;
+    /// @dev ETH in this smart contract that belongs to Stakewithus.
+    uint256 internal _treasuryETH;
+    /// @dev ETH still in EigenLayer withdrawal queue that belongs to Stakewithus.
+    uint256 internal _queuedTreasuryETH;
 
     error Unauthorized();
     error NothingToClaim();
 
-    receive() external payable {
-        if (msg.sender == address(staking) || msg.sender == address(delayedWithdrawalRouter)) return;
-
-        // Split incoming execution layer rewards with Stakewithus treasury.
-        uint256 fee = staking.calculateExecutionFee(msg.value);
-        uint256 toUser = msg.value - fee;
-        SafeTransferLib.safeTransferETH(staking.treasury(), fee);
-        SafeTransferLib.safeTransferETH(user, toUser);
-        emit ExecutionRewards(toUser, fee);
-    }
+    receive() external payable {}
 
     /*//////////////////////////////////////
              INITIALIZER
@@ -130,7 +123,7 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
     }
 
     /*//////////////////////////////////////
-             WITHDRAWAL
+             QUEUE WITHDRAWAL
     //////////////////////////////////////*/
 
     /// @notice Queue withdrawal of EigenPod non-Beacon Chain ETH. Stakewithus also has access to this function so we
@@ -138,41 +131,42 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
     /// @dev We assume that non-Beacon Chain ETH in EigenPods are restaking rewards provided by EigenLayer operators.
     function queueRestakingRewards() external onlyUserOrOperator {
         uint256 eigenPodBalance = eigenPod.nonBeaconChainETHBalanceWei();
+        if (eigenPodBalance == 0) revert NothingToClaim();
 
-        if (eigenPodBalance > 0) {
-            eigenPod.withdrawNonBeaconChainETHBalanceWei(address(this), eigenPodBalance);
+        eigenPod.withdrawNonBeaconChainETHBalanceWei(address(this), eigenPodBalance);
 
-            // Earmark cut of restaking rewards belonging to Stakewithus treasury.
-            _queuedTreasuryRewards += staking.calculateRestakingFee(eigenPodBalance);
-        }
+        // Earmark cut of restaking rewards belonging to Stakewithus treasury.
+        _queuedTreasuryETH += staking.calculateRestakingFee(eigenPodBalance);
     }
 
     /*//////////////////////////////////////
-             ETH & REWARDS
+             ETH CLAIMS
     //////////////////////////////////////*/
 
-    /// @notice Current balance of this smart contract which belongs to user.
-    function unclaimedETH() public view returns (uint256) {
-        return address(this).balance + _treasuryRewards;
+    /// @notice ETH in contract and claimable queue that belongs to user.
+    function unclaimedETH() external view returns (uint256) {
+        (uint256 userClaimableRewards, ) = _getCalculateClaimableRewards();
+        (uint256 userContractETH, ) = calculateContractETH();
+        return userClaimableRewards + userContractETH;
     }
 
-    /// @notice Helper function to calculate queued EigenLayer rewards which are claimable by user.
-    function getClaimableRewards() external view returns (uint256) {
-        IDelayedWithdrawalRouter.DelayedWithdrawal[] memory claimable = delayedWithdrawalRouter
-            .getClaimableUserDelayedWithdrawals(address(this));
-
-        (uint256 toUser, ) = _calculateClaimableRewards(claimable);
-        return toUser;
+    ///@notice Get amount of ETH in contract that belongs to user and treasury.
+    function calculateContractETH() public view returns (uint256 toUser, uint256 toTreasury) {
+        (toUser, toTreasury) = _calculateExecutionRewards();
+        toUser += _userETH;
+        toTreasury += _treasuryETH;
     }
 
     function claimETH(bool claimDelayedWithdrawals_) external onlyUser {
         // First, claim delayed withdrawals.
         if (claimDelayedWithdrawals_) _claimDelayedWithdrawals();
 
-        if (unclaimedETH() == 0) revert NothingToClaim();
+        (uint256 userContractETH, uint256 treasuryContractETH) = calculateContractETH();
 
-        // Next, process Stakewithus cut.
-        if (_treasuryRewards > 0) _treasuryClaim();
+        if (userContractETH == 0) revert NothingToClaim();
+
+        // Next, process Stakewithus cut if there's anything to claim..
+        if (treasuryContractETH > 0) _treasuryClaim();
 
         // Finally, process user's ETH.
         emit ClaimETH(address(this).balance);
@@ -181,10 +175,70 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
 
     function treasuryClaim(bool claimDelayedWithdrawals_) external onlyOperator {
         if (claimDelayedWithdrawals_) _claimDelayedWithdrawals();
-
-        if (_treasuryRewards == 0) revert NothingToClaim();
         _treasuryClaim();
     }
+
+    function _treasuryClaim() internal {
+        (uint256 toUser, uint256 toTreasury) = _calculateExecutionRewards();
+        uint256 amount = toTreasury + _treasuryETH;
+
+        if (amount == 0) return; // Do nothing as treasury has nothing to claim.
+        SafeTransferLib.safeTransferETH(staking.treasury(), amount);
+
+        _userETH += toUser;
+        _treasuryETH = 0;
+
+        emit TreasuryClaim(amount);
+    }
+
+    function _claimDelayedWithdrawals() internal {
+        IDelayedWithdrawalRouter.DelayedWithdrawal[] memory claimable = delayedWithdrawalRouter
+            .getClaimableUserDelayedWithdrawals(address(this));
+        if (claimable.length == 0) revert NothingToClaim();
+
+        (uint256 toUser, uint256 toTreasury) = _calculateClaimableRewards(claimable);
+
+        delayedWithdrawalRouter.claimDelayedWithdrawals(claimable.length);
+
+        _userETH += toUser;
+        _treasuryETH += toTreasury;
+        _queuedTreasuryETH -= toTreasury;
+    }
+
+    function _getCalculateClaimableRewards() internal view returns (uint256 toUser, uint256 toTreasury) {
+        IDelayedWithdrawalRouter.DelayedWithdrawal[] memory claimable = delayedWithdrawalRouter
+            .getClaimableUserDelayedWithdrawals(address(this));
+
+        return _calculateClaimableRewards(claimable);
+    }
+
+    function _calculateClaimableRewards(
+        IDelayedWithdrawalRouter.DelayedWithdrawal[] memory claimable_
+    ) internal view returns (uint256 toUser, uint256 toTreasury) {
+        // First, calculate all claimable rewards under `toUser`.
+        uint256 length = claimable_.length;
+        for (uint256 i = 0; i < length; ++i) {
+            toUser += claimable_[i].amount;
+        }
+
+        // If we have queued treasury rewards, transfer from `toUser` to `ToTreasury`.
+        if (_queuedTreasuryETH == 0) return (toUser, toTreasury);
+
+        // Limit fee collected in one claim tx to same ratio as Stakewithus restaking fee.
+        uint256 limit = staking.calculateRestakingFee(toUser);
+        toTreasury = _queuedTreasuryETH > limit ? limit : _queuedTreasuryETH;
+        toUser -= toTreasury;
+    }
+
+    function _calculateExecutionRewards() internal view returns (uint256 toUser, uint256 toTreasury) {
+        uint256 balance = address(this).balance - _userETH - _treasuryETH;
+        toTreasury = staking.calculateExecutionFee(balance);
+        toUser = balance - toTreasury;
+    }
+
+    /*//////////////////////////////////////
+             ERC20 CLAIMS
+    //////////////////////////////////////*/
 
     /// @dev Claim ERC20 tokens deposited in EigenPod or EigenUser (e.g. restaking rewards or airdrops).
     function claimTokens(address token_) external onlyUserOrOperator {
@@ -214,48 +268,6 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
         token.safeTransfer(user, toUser);
 
         emit ClaimTokens(address(token), toUser, fee);
-    }
-
-    function _treasuryClaim() internal {
-        SafeTransferLib.safeTransferETH(staking.treasury(), _treasuryRewards);
-        _treasuryRewards = 0;
-        emit TreasuryClaim(_treasuryRewards);
-    }
-
-    function _claimDelayedWithdrawals() internal {
-        IDelayedWithdrawalRouter.DelayedWithdrawal[] memory claimable = delayedWithdrawalRouter
-            .getClaimableUserDelayedWithdrawals(address(this));
-        if (claimable.length == 0) return;
-
-        (, uint256 toTreasury) = _calculateClaimableRewards(claimable);
-
-        delayedWithdrawalRouter.claimDelayedWithdrawals(claimable.length);
-
-        if (_queuedTreasuryRewards == 0) return;
-
-        _treasuryRewards += toTreasury;
-        _queuedTreasuryRewards -= toTreasury;
-    }
-
-    function _calculateClaimableRewards(
-        IDelayedWithdrawalRouter.DelayedWithdrawal[] memory claimable_
-    ) public view returns (uint256 toUser, uint256 toTreasury) {
-        // First, calculate all claimable rewards under `toUser`.
-        uint256 length = claimable_.length;
-        for (uint256 i = 0; i < length; ++i) {
-            toUser += claimable_[i].amount;
-        }
-
-        // If we have queued treasury rewards, transfer from `toUser` to `ToTreasury`.
-        if (_queuedTreasuryRewards == 0) return (toUser, toTreasury);
-
-        if (toUser > _queuedTreasuryRewards) {
-            toUser -= _queuedTreasuryRewards;
-            toTreasury += _queuedTreasuryRewards;
-        } else {
-            toTreasury = toUser;
-            toUser = 0;
-        }
     }
 
     /*//////////////////////////////////////

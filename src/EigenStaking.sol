@@ -98,7 +98,7 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
     }
 
     /**
-     * @notice Deposits ETH into this contract for stakewith.us to create a new validator node on user's behalf.
+     * @notice Deposits ETH into this contract for Stakewithus to create a new validator node on user's behalf.
      * @param user_ User's withdrawal address which receives consensus rewards and can claim execution layer rewards.
      * @dev `msg.value` must be a multiple of `_DEPOSIT_AMOUNT (32 ether) + oneTimeFee`
      */
