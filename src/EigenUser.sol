@@ -184,11 +184,11 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
         uint256 amount = toTreasury + _treasuryETH;
 
         if (amount == 0) return; // Do nothing as treasury has nothing to claim.
-        SafeTransferLib.safeTransferETH(staking.treasury(), amount);
 
         _userETH += toUser;
         _treasuryETH = 0;
 
+        SafeTransferLib.safeTransferETH(staking.treasury(), amount);
         emit TreasuryClaim(amount);
     }
 
@@ -199,11 +199,11 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
 
         (uint256 toUser, uint256 toTreasury) = _calculateClaimableRewards(claimable);
 
-        delayedWithdrawalRouter.claimDelayedWithdrawals(claimable.length);
-
         _userETH += toUser;
         _treasuryETH += toTreasury;
         _queuedTreasuryETH -= toTreasury;
+
+        delayedWithdrawalRouter.claimDelayedWithdrawals(claimable.length);
     }
 
     function _getCalculateClaimableRewards() internal view returns (uint256 toUser, uint256 toTreasury) {

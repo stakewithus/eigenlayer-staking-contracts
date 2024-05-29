@@ -41,10 +41,10 @@ contract StakingTest is Test, IEigenStakingEvents {
         assertEq(staking.pendingValidators(user), 0);
         assertEq(staking.registry(user), address(0));
 
-        vm.expectEmit(true, false, false, false);
-        emit UserRegistered(user, address(0));
         vm.expectEmit();
         emit Deposit(user, user, validators_);
+        vm.expectEmit(true, false, false, false);
+        emit UserRegistered(user, address(0));
         vm.prank(user);
         staking.deposit{value: validators_ * 33 ether}(user);
 

@@ -113,6 +113,14 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
         uint256 perValidator = _DEPOSIT_AMOUNT + oneTimeFee;
         if (msg.value == 0 || msg.value % perValidator != 0) revert InvalidAmount();
 
+        uint256 validators = msg.value / perValidator;
+
+        pendingValidators[user_] += validators;
+        totalPendingValidators += validators;
+        lastDepositTimestamps[user_] = block.timestamp;
+
+        emit Deposit(msg.sender, user_, validators);
+
         // Deploy User proxy for address if it's their first deposit.
         if (registry[user_] == address(0)) {
             address eigenUser = address(
@@ -124,14 +132,6 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
             registry[user_] = eigenUser;
             emit UserRegistered(user_, eigenUser);
         }
-
-        uint256 validators = msg.value / perValidator;
-
-        pendingValidators[user_] += validators;
-        totalPendingValidators += validators;
-        lastDepositTimestamps[user_] = block.timestamp;
-
-        emit Deposit(msg.sender, user_, validators);
     }
 
     /**
