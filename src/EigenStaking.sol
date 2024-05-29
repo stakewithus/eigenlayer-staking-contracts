@@ -262,6 +262,7 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
     }
 
     function _setTreasury(address treasury_) internal {
+        if (treasury_ == address(0)) revert ZeroAddress();
         emit NewTreasury(treasury, treasury_);
         treasury = treasury_;
     }
