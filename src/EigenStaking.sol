@@ -138,7 +138,7 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
      * @notice Refunds unstaked ETH to user. User must wait for at least `refundDelay` after depositing before
      * initiating a refund.
      */
-    function refund() external nonReentrant {
+    function refund() external {
         uint256 validators = pendingValidators[msg.sender];
         if (block.timestamp < lastDepositTimestamps[msg.sender] + refundDelay) revert BeforeRefundDelay();
 
@@ -149,7 +149,7 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
              OPERATOR FUNCTIONS
     ////////////////////////////////////////*/
 
-    function stake(address user_, DepositData[] memory data_) external onlyOperator {
+    function stake(address user_, DepositData[] memory data_) external onlyOperator nonReentrant {
         uint256 length = data_.length;
         if (length == 0) revert InvalidLength();
 
@@ -228,7 +228,7 @@ contract EigenStaking is IBeacon, IEigenStakingEvents, Pausable, ReentrancyGuard
              INTERNAL FUNCTIONS
     ////////////////////////////////////////*/
 
-    function _refund(address user_, uint256 validators_) internal {
+    function _refund(address user_, uint256 validators_) internal nonReentrant {
         if (validators_ == 0) revert NoDeposit();
 
         // This underflows, throwing an error if validators_ > pendingValidators[user_]
