@@ -82,10 +82,10 @@ contract StakingTest is Test, IEigenStakingEvents {
         assertEq(staking.pendingValidators(user), 0);
         assertEq(staking.registry(user), address(0));
 
-        vm.expectEmit(true, false, false, false);
-        emit UserRegistered(user, address(0));
         vm.expectEmit();
         emit Deposit(user, user, validators_);
+        vm.expectEmit(true, false, false, false);
+        emit UserRegistered(user, address(0));
         vm.prank(user);
         (bool success, ) = address(staking).call{value: validators_ * 33 ether}("");
         assertTrue(success);
@@ -112,6 +112,17 @@ contract StakingTest is Test, IEigenStakingEvents {
         vm.expectRevert(Pausable.EnforcedPause.selector);
         vm.prank(user);
         staking.deposit{value: 33 ether}(user);
+
+        assertEq(staking.pendingValidators(user), 0);
+        assertEq(staking.registry(user), address(0));
+
+        staking.unpause();
+
+        vm.prank(user);
+        staking.deposit{value: 33 ether}(user);
+
+        assertEq(staking.pendingValidators(user), 1);
+        assertNotEq(staking.registry(user), address(0));
     }
 
     function test_refund(uint8 validators_, uint256 oneTimeFee_) public {
@@ -164,6 +175,32 @@ contract StakingTest is Test, IEigenStakingEvents {
         staking.refundUser(user, 0);
     }
 
+    function test_stake() public {
+        vm.prank(user);
+        staking.deposit{value: 33 ether}(user);
+
+        assertEq(staking.pendingValidators(user), 1);
+        assertEq(staking.totalPendingValidators(), 1);
+
+        EigenStaking.DepositData[] memory data = new EigenStaking.DepositData[](1);
+
+        data[0] = EigenStaking.DepositData({
+            pubkey: hex"904ea04fe799c8bed84c1e7cf19bf7b2802d25c22caed1bea5f4c99d1ad056350e6e3b82c99983a8fa009b5ca2b854de",
+            signature: hex"8898c3f373876586b36efa57fb0276b68c013775c1dfe1e78e7e8bacc54b6c516b6e10a667616c900ad09cb89563935001f0ae85b45dee4d5aaf377bbc86eb783d45c71e526f9b89379ed5886822418fed02679bb53b495a4615fcceab6901d7",
+            deposit_data_root: 0x865ea943c21d61948d650e2b0b534c4ce02549dd1a2d216e3555037a803d62fe
+        });
+
+        bytes[] memory pubkeys = new bytes[](1);
+        pubkeys[0] = data[0].pubkey;
+
+        vm.expectEmit();
+        emit Staked(user, pubkeys);
+        staking.stake(user, data);
+
+        assertEq(staking.pendingValidators(user), 0);
+        assertEq(staking.totalPendingValidators(), 0);
+    }
+
     function test_stake_reverts_if_invalid_length() public {
         vm.prank(user);
         staking.deposit{value: 33 ether}(user);
@@ -182,6 +219,13 @@ contract StakingTest is Test, IEigenStakingEvents {
 
         vm.expectRevert();
         staking.stake(user, data);
+    }
+
+    function test_setOneTimeFee_reverts_if_same_value() public {
+        assertEq(staking.oneTimeFee(), 1 ether);
+
+        vm.expectRevert(EigenStaking.SameValue.selector);
+        staking.setOneTimeFee(1 ether);
     }
 
     function test_setOneTimeFee_reverts_if_there_are_pending_validators() public {

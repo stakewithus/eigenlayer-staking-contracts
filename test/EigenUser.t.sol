@@ -116,7 +116,7 @@ contract EigenUserTest is Test, IEigenUserEvents, WithdrawalCredentialsProof {
 
         assertEq(eigenUser.unclaimedETH(), 0);
         vm.roll(block.number + 21_001);
-        assertEq(eigenUser.unclaimedETH(), toUser);
+        assertEq(eigenUser.unclaimedETH(), toUser + toUserTwo);
 
         // Tx fails if nothing to claim.
         vm.expectRevert(EigenUser.NothingToClaim.selector);
@@ -128,6 +128,7 @@ contract EigenUserTest is Test, IEigenUserEvents, WithdrawalCredentialsProof {
 
         assertEq(address(treasury).balance, treasuryBalance + toTreasury + toTreasuryTwo);
         assertEq(address(user).balance, userBalance + toUser + toUserTwo);
+        assertEq(eigenUser.unclaimedETH(), 0);
     }
 
     function test_queueRestakingRewards_reverts_if_nothing_to_queue() public {
@@ -144,6 +145,55 @@ contract EigenUserTest is Test, IEigenUserEvents, WithdrawalCredentialsProof {
         vm.expectRevert(EigenUser.NothingToClaim.selector);
         vm.prank(user);
         eigenUser.claimETH(true);
+    }
+
+    function test_treasuryClaim(uint256 amount_) public {
+        vm.assume(amount_ > 0 && amount_ < type(uint224).max);
+
+        uint256 treasuryBalance = address(treasury).balance;
+        uint256 userBalance = address(user).balance;
+
+        uint256 toTreasury = amount_ / 4;
+        uint256 toUser = (amount_ - toTreasury);
+
+        (bool sent, ) = address(eigenUser.eigenPod()).call{value: amount_}("");
+        assertTrue(sent);
+
+        vm.prank(staking.operator());
+        eigenUser.queueRestakingRewards();
+        assertEq(eigenUser.unclaimedETH(), 0);
+        vm.roll(block.number + 21_001);
+        assertEq(eigenUser.unclaimedETH(), toUser);
+
+        // Nothing to claim.
+        vm.prank(staking.operator());
+        eigenUser.treasuryClaim(false);
+        assertEq(eigenUser.unclaimedETH(), toUser);
+        assertEq(address(treasury).balance, treasuryBalance);
+
+        vm.prank(staking.operator());
+        eigenUser.treasuryClaim(true);
+        assertEq(eigenUser.unclaimedETH(), toUser);
+        assertEq(address(treasury).balance, treasuryBalance + toTreasury);
+
+        (uint256 userETH, uint256 treasuryETH) = eigenUser.calculateContractETH();
+        assertEq(userETH, toUser);
+        assertEq(treasuryETH, 0);
+
+        vm.prank(user);
+        eigenUser.claimETH(false);
+
+        assertEq(address(user).balance, userBalance + toUser);
+        assertEq(address(treasury).balance, treasuryBalance + toTreasury);
+        assertEq(eigenUser.unclaimedETH(), 0);
+    }
+
+    function test_treasuryClaim_reverts_if_not_operator() public {
+        address other = makeAddr("other");
+
+        vm.prank(other);
+        vm.expectRevert(EigenUser.Unauthorized.selector);
+        eigenUser.treasuryClaim(true);
     }
 
     function test_calculateContractETH(uint256 amount_) public {
@@ -163,6 +213,9 @@ contract EigenUserTest is Test, IEigenUserEvents, WithdrawalCredentialsProof {
     function test_claimTokens(uint256 amount_) public {
         vm.assume(amount_ > 0 && amount_ < type(uint128).max);
 
+        uint256 toTreasury = amount_ / 4;
+        uint256 toUser = (amount_ - toTreasury);
+
         MockERC20 token = new MockERC20("Mock ERC20", "MT");
 
         token.mint(address(eigenUser.eigenPod()), amount_);
@@ -170,11 +223,16 @@ contract EigenUserTest is Test, IEigenUserEvents, WithdrawalCredentialsProof {
         vm.prank(user);
         eigenUser.claimTokens(address(token));
 
-        uint256 toTreasury = amount_ / 4;
-        uint256 toUser = (amount_ - toTreasury);
-
         assertEq(token.balanceOf(treasury), toTreasury);
         assertEq(token.balanceOf(user), toUser);
+
+        token.mint(address(eigenUser), amount_);
+
+        vm.prank(user);
+        eigenUser.claimTokens(address(token));
+
+        assertEq(token.balanceOf(treasury), toTreasury * 2);
+        assertEq(token.balanceOf(user), toUser * 2);
     }
 
     function test_claimTokens_reverts_if_nothing_to_claim() public {
