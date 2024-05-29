@@ -170,6 +170,7 @@ contract EigenUser is IEigenUser, IEigenUserEvents, Initializable {
 
         // Finally, process user's ETH.
         emit ClaimETH(address(this).balance);
+        _userETH = 0;
         SafeTransferLib.safeTransferETH(user, address(this).balance);
     }
 
